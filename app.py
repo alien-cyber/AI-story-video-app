@@ -1,6 +1,7 @@
 import base64
 import requests
 import cv2
+from gtts import gTTS
 from pydub import AudioSegment
 import os
 from dotenv import load_dotenv,find_dotenv
@@ -8,7 +9,7 @@ from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain_community.llms import OpenAI
 import time
-import streamlit as st
+
 from PIL import Image
 import io
 import gradio as gr
@@ -55,7 +56,6 @@ def merge():
 def promptgenerator(scene):
     template="""
     you are given a scene from a story ;genearate a prompt for image generation,image describes the scene;
-    dont add story details in the prompt;the promth should not have details like name,place one exampe prompth
     ;SCENE:{scene}
     prompt:"""
     prompt=PromptTemplate(template=template,input_variables=["scene"])
@@ -86,30 +86,51 @@ def images_to_video(imagelist, video_name='D:\python\Aiapp\output_video.mp4', fp
     cv2.destroyAllWindows()
     video.release()
 def text_to_audio(text,index):
-    
-    API_URL = "https://api-inference.huggingface.co/models/espnet/kan-bayashi_ljspeech_vits"
-    headers = {"Authorization": f"Bearer {huggingface_key}",}
-    payload={"inputs":text}
-    response = requests.post(API_URL, headers=headers, json=payload)
-    if not os.path.exists(r"D:\python\Aiapp\audio_file"):
-        os.makedirs(r"D:\python\Aiapp\audio_file")
-    with open(rf'D:\python\Aiapp\audio_file\audio_{index}.flac','wb') as file:
-        file.write(response.content)
+    if text:
+        tts=gTTS(text)
+        tts.save(rf'D:\python\Aiapp\audio_file\audio_{index}.flac')
+    else:
+        tts=gTTS("The end")
+        tts.save(rf'D:\python\Aiapp\audio_file\audio_{index}.flac')
 
 def text2img(prompt,index):
-    API_URL = "https://api-inference.huggingface.co/models/CompVis/stable-diffusion-v1-4"
-    headers = {"Authorization": f"Bearer {huggingface_key}"}
-    def query(payload):
-        response = requests.post(API_URL, headers=headers, json=payload)
-        return response.content
-    image_bytes = query({
-    "inputs": f"{prompt}",
-})
+    url = "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image"
+    body = {
+  "steps": 40,
+  "width": 1024,
+  "height": 1024,
+  "seed": 0,
+  "cfg_scale": 5,
+  "samples": 1,
+  "text_prompts": [
+    {
+      "text": f"{prompt}",
+      "weight": 1
+    },
+    {
+      "text": "blurry, bad",
+      "weight": -1
+    }
+  ],
+}
+    headers = {
+  "Accept": "application/json",
+  "Content-Type": "application/json",
+  "Authorization": f"Bearer {stabilityai_key}",
+}
+    response = requests.post(
+  url,
+  headers=headers,
+  json=body,
+)
+    if response.status_code != 200:
+        raise Exception("Non-200 response: " + str(response.text))
+    data = response.json()
     if not os.path.exists("D:\python\Aiapp\out"):
         os.makedirs("D:\python\Aiapp\out")
-    image = Image.open(io.BytesIO(image_bytes))
-    output_filename = f'D:\\python\\Aiapp\out\\txt2img_{index}.png'
-    image.save(output_filename)
+    for image in data["artifacts"]:
+        with open(f'D:\python\Aiapp\out/txt2img_{index}.png', "wb") as f:
+            f.write(base64.b64decode(image["base64"]))
 
 def func(story):
     
