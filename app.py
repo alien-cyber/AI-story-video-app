@@ -1,197 +1,261 @@
-import base64
-import requests
-import cv2
-from gtts import gTTS
-from pydub import AudioSegment
+from flask import Flask, render_template, request, session, url_for, redirect, jsonify
+from flask_cors import CORS
+from pymongo import MongoClient
+from dotenv import load_dotenv,find_dotenv
 import os
 from dotenv import load_dotenv,find_dotenv
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from langchain_community.llms import OpenAI
-import time
 
-from PIL import Image
-import io
-import gradio as gr
-import subprocess
-load_dotenv(find_dotenv())
-stabilityai_key=os.getenv("stabilityai_api")
-openai_key=os.getenv("openai_api")
-os.environ["OPENAI_API_KEY"] = openai_key
-huggingface_key=os.getenv("huggingface_key")
 
-def merge_audio_files( output_file='D:\\python\\Aiapp\\audio.flac',input_folder="D:\\python\\Aiapp\\audio_file"):
-     files = os.listdir(input_folder)
-     num_files = len(files)
-     files = [os.path.join(input_folder, file) for file in files]
-     merged_audio = AudioSegment.from_file(files[0])
-     for i in range(1,num_files):
-         merged_audio+=AudioSegment.from_file(files[i])
-     merged_audio.export(output_file, format="mp3")
-def delete_audiofiles(folder_path='D:\\python\\Aiapp\\audio_file'):
-    files = os.listdir(folder_path)
-    for file in files:
-        file_path = os.path.join(folder_path, file)
-        if os.path.isfile(file_path):
-            os.remove(file_path)
+app = Flask(__name__)
+app.secret_key = '123456789'  
+CORS(app)
 
-def get_audio_duration(index):
-   audio_file=rf'D:\python\Aiapp\audio_file\audio_{index}.flac'
-   audio = AudioSegment.from_file(audio_file)
-   duration_ms = len(audio)
-   duration_seconds = duration_ms / 1000.0
-   return duration_seconds
 
-def merge():
-    command = 'C:\\Users\\Selva\\ffmpeg\\ffmpeg-6.1.1-essentials_build\\bin\\ffmpeg.exe -y -i D:\\python\\Aiapp\\output_video.mp4 -i D:\\python\\Aiapp\\audio.flac D:\\python\\Aiapp\\output.mp4'
-    subprocess.run(command, shell=True)
+mongo_url=os.getenv("mongo_url")
+client = MongoClient(mongo_url)
+db = client.flask_db
+db.users.insert_one({"dummy": "data"})
+db.users.delete_one({"dummy": "data"})
+db.likes.insert_one({"dummy": "data"})
+db.likes.delete_one({"dummy": "data"})
+db.playlists.insert_one({"dummy": "data"})
+db.playlists.delete_one({"dummy": "data"})
+db.playlists_name.insert_one({"dummy": "data"})
+db.playlists_name.delete_one({"dummy": "data"})
+users = db.users
+likes = db.likes
+playlists = db.playlists
+playlists_name=db.playlists_name
 
 
 
 
+@app.route('/', methods=('GET', 'POST'))
+def login():
+    msg="Login"
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        myquery = { "email": email }
+        mydoc = users.find_one(myquery)
+   
+        if mydoc:
+            if password==mydoc['password']:
+                session['email']=email
+                return redirect(url_for('dashboard'))
+            else:
+                msg="Incorrect Password"
+        else:
+            msg="Email does not exist "
 
 
-    
-    
-def promptgenerator(scene):
-    template="""
-    you are given a scene from a story ;genearate a prompt for image generation,image describes the scene;
-    ;SCENE:{scene}
-    prompt:"""
-    prompt=PromptTemplate(template=template,input_variables=["scene"])
-    prompt_llm=LLMChain(llm=OpenAI(model_name="gpt-3.5-turbo",temperature=1),prompt=prompt,verbose=True)
-    prompt=prompt_llm.predict(scene=scene)
-    print(prompt)
-    return prompt
-def generatestory(context):
-    template="""
-    you are a story teller;genearate a creative story about the prompt,max  40 words;
-    CONTEXT:{context}
-    STORY:"""
-    
-    prompt=PromptTemplate(template=template,input_variables=["context"])
-    story_llm=LLMChain(llm=OpenAI(model_name="gpt-3.5-turbo",temperature=1),prompt=prompt,verbose=True)
-    story=story_llm.predict(context=context)
-    print(story)
-    return story
+    return render_template('login.html',msg=msg)
 
 
-def images_to_video(imagelist, video_name='D:\python\Aiapp\output_video.mp4', fps=24):
-    duplicated_images =imagelist
-    frame = cv2.imread(duplicated_images[0])
-    height, width, layers = frame.shape
-    video = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc(*'MP4V'), fps, (width, height))
-    for image in duplicated_images:
-        video.write(cv2.imread(image))
-    cv2.destroyAllWindows()
-    video.release()
-def text_to_audio(text,index):
-    if text:
-        tts=gTTS(text)
-        tts.save(rf'D:\python\Aiapp\audio_file\audio_{index}.flac')
+@app.route('/signup', methods=('GET', 'POST'))
+def signup():
+    msg="Signup"
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        username = request.form['username']
+        myquery = { "email": email }
+        mydoc = likes.find_one(myquery)
+        
+        if mydoc:
+            msg="Email Already Exist"
+            
+        else:
+            msg="Signup Success"
+            mydict = { "username": username, "email": email,"password":password }
+            likes.insert_one(mydict)
+
+            return redirect(url_for('login'))
+
+
+ 
+    return render_template('signup.html',msg=msg)
+
+@app.route('/dashboard', methods=('GET', 'POST'))
+def dashboard():
+  
+    return render_template('dashboard.html')
+
+@app.route('/like_update', methods=['POST'])
+def like_update():
+    data = request.get_json()
+    url=data['url']
+    email=session['email']
+    cursor=likes.find_one({'email':email,'url':url})
+    if cursor!=None:
+        if cursor['count']==1:
+            count=0
+        else:
+            count=1
+        myquery = {'email':email,'url':url}
+        newvalues = { "$set": { "count": count } }   
+        likes.update_one(myquery, newvalues)
     else:
-        tts=gTTS("The end")
-        tts.save(rf'D:\python\Aiapp\audio_file\audio_{index}.flac')
-
-def text2img(prompt,index):
-    url = "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image"
-    body = {
-  "steps": 40,
-  "width": 1024,
-  "height": 1024,
-  "seed": 0,
-  "cfg_scale": 5,
-  "samples": 1,
-  "text_prompts": [
-    {
-      "text": f"{prompt}",
-      "weight": 1
-    },
-    {
-      "text": "blurry, bad",
-      "weight": -1
-    }
-  ],
-}
-    headers = {
-  "Accept": "application/json",
-  "Content-Type": "application/json",
-  "Authorization": f"Bearer {stabilityai_key}",
-}
-    response = requests.post(
-  url,
-  headers=headers,
-  json=body,
-)
-    if response.status_code != 200:
-        raise Exception("Non-200 response: " + str(response.text))
-    data = response.json()
-    if not os.path.exists("D:\python\Aiapp\out"):
-        os.makedirs("D:\python\Aiapp\out")
-    for image in data["artifacts"]:
-        with open(f'D:\python\Aiapp\out/txt2img_{index}.png', "wb") as f:
-            f.write(base64.b64decode(image["base64"]))
-
-def func(story):
+        mydict = { 'email':email, 'url': url,'count':1 }
+        likes.insert_one(mydict)
     
-    result_list=story.split(".")
-    result_list=[s.strip() for s in result_list]
+    return jsonify({'message': 'Data received successfully'})
+
+@app.route('/get_count', methods=['POST'])
+def get_count():
+    data = request.get_json()
+    email=session['email']
+    url=data['url']
+    cursor=likes.find({'url':url})
+    cursor=list(cursor)
+    count=0
+    color='grey'
+    if cursor:
+        for doc in cursor:
+            if doc['count']==1:
+                count+=1
+                if doc['email']==email:
+                    color='red'
     
-    print(result_list)
-    imagelist=[]
-    fps=24
-    delete_audiofiles()
-    for i in range(len(result_list)):
-        time.sleep(5)
-        text_to_audio(text=result_list[i],index=i)
-        prompt=promptgenerator(result_list[i])
-        text2img(prompt=prompt,index=i)
-        duration=get_audio_duration(index=i)
-        imagelist.extend([f'D:\\python\\Aiapp\out\\txt2img_{i}.png']*round(fps*duration))
-    images_to_video(imagelist)
-    merge_audio_files()
-    merge()
-
-def video(input_prompt):
-    story=generatestory(input_prompt)
-    time.sleep(20)
-    func(story)
-    path='D:\\python\\Aiapp\\output.mp4'
-    return gr.Video(path)
-def video_by_story(story):
-    func(story)
-    path='D:\\python\\Aiapp\\output.mp4'
-    return gr.Video(path)
+       
+       
+    return jsonify({'count': count,'color':color})
     
-def main():
-    with gr.Blocks() as demo:
-        txt1 = gr.Textbox(label="Input prompt")
-        
-        btn1 = gr.Button(value="Submit")
-        output=gr.Video()
-        btn1.click(video, inputs=[txt1], outputs=[output])
-        txt2=gr.Textbox(label="input your own story",lines=5)
-        btn2=gr.Button(value="submit")
-        btn2.click(video_by_story, inputs=[txt2], outputs=[output])
-        
-    demo.launch()
+
+
+@app.route('/logout')
+def logout():
+    session.pop('email', None)  
+    session.clear() 
+    return redirect(url_for('login'))
+
+
+@app.route('/playlist')
+def playlist():
     
-    
-if __name__=='__main__':
-    main()
+    return render_template('playlist.html')
 
 
+@app.route('/create_playlist', methods=['POST'])
+def create_playlist():
+    data = request.get_json()
+    email=session['email']
+    name = data['c_playlist']
+    img=data['upload_image']
+    mydict = { "name": name, "email": email,"image":img }
+    playlists_name.insert_one(mydict)
+  
+    return jsonify({'message':'got it'})
 
 
-
-
-
-
-
+@app.route('/get_names', methods=['POST'])
+def get_names():
+    data = request.get_json()
+    email=session['email']
+    query={'email':email}
+    names_cursor = playlists_name.distinct('name',query)
+    names = list(names_cursor)
 
    
+    for name in names:
+        if '_id' in name:
+            name['_id'] = str(name['_id'])
 
+  
+    return jsonify({'names':names})
 
-
-
+@app.route('/add_song', methods=['POST'])
+def add_song():
+    email=session['email']
+  
+ 
+    selected_playlists =  request.get_json()
    
+    url=selected_playlists['url']
+    img_url=selected_playlists['img']
+    songname=selected_playlists['name']
+    
+
+
+
+    for name in selected_playlists:
+        if name!='url':
+            if name!='img':
+                myquery = {'email':email,'url':url,'image':img_url,'playlist_name':name,'songname':songname}
+                playlists.insert_one(myquery)
+                
+   
+
+    clean()
+    return jsonify({'message':'got it'})
+
+
+
+@app.route('/get_playlists', methods=['POST'])
+def get_playlists():
+ 
+    email=session['email']
+    query={'email':email}
+    names_cursor = playlists_name.find(query)
+    names = list(names_cursor)
+    duplicate=[]
+    filtered=[]
+
+    for name in names:
+        if '_id' in name:
+            name['_id'] = str(name['_id'])
+        if name['name'] not in duplicate:
+            duplicate.append(name['name'])
+            filtered.append(name)
+            
+    
+  
+    return jsonify({'names':filtered})
+
+@app.route('/get_songs', methods=['POST'])
+def get_songs():
+    data = request.get_json()
+   
+  
+    session['songname']=data['songname']
+
+
+    return jsonify({'message':'got it'})
+
+    
+@app.route('/play_songs', methods=('GET', 'POST'))
+def play_songs():
+    return render_template('playlist_songs.html')
+
+
+
+@app.route('/songs', methods=['POST'])
+def songs():
+    email=session['email']
+    name=session['songname']
+    image_cursor=playlists_name.find_one({'email':email,'name':name})
+    img=image_cursor['image']
+    query={'email':email,'playlist_name':name}
+    cursor=playlists.find(query)
+    cursor=list(cursor)
+    duplicate=[]
+    filtered=[]
+    for doc in cursor:
+        if '_id' in doc:
+            doc['_id'] = str(doc['_id'])
+        if doc['songname'] not in duplicate:
+            duplicate.append(doc['songname'])
+            filtered.append(doc)
+    
+    return jsonify({'cursor':filtered,'name':name,'image':img})
+
+
+def clean():
+    session.pop('imgurl', None) 
+    session.pop('songname', None)  
+
+    
+    return 
+
+if __name__ == '__main__':
+    app.run(debug=True)
